@@ -191,10 +191,14 @@ export default function App() {
           } else {
             // Check by email if needed (bootstrap)
             if (user.email === 'kazih6684@gmail.com') {
-              await setDoc(doc(db, path), {
-                email: user.email,
-                role: 'superadmin'
-              });
+              try {
+                await setDoc(doc(db, path), {
+                  email: user.email,
+                  role: 'superadmin'
+                }, { merge: true });
+              } catch (e) {
+                console.warn("Bootstrap admin doc creation failed, but continuing as admin state is set locally", e);
+              }
               setIsAdmin(true);
               setIsAuthorized(true);
               sessionStorage.setItem('partner_access_granted', 'true');

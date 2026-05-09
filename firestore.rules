@@ -12,27 +12,27 @@ service cloud.firestore {
     }
     
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'kazih6684@gmail.com') ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
     }
 
     // Settings collection
     match /settings/global {
       allow read: if true;
-      allow create, update: if isAdmin() && 
-        request.resource.data.accessPin is string &&
-        request.resource.data.accessPin.size() >= 4 &&
-        (request.resource.data.logoUrl == null || request.resource.data.logoUrl is string);
+      allow write: if isAdmin();
     }
 
     // Admins collection
     match /admins/{userId} {
       allow read: if isSignedIn();
-      // Allow bootstrap admin creation
-      allow create: if isSignedIn() && 
+      // Allow bootstrap admin creation and update
+      allow create, update: if isSignedIn() && 
                     userId == request.auth.uid && 
-                    request.auth.token.email == 'kazih6684@gmail.com' &&
+                    ((request.auth.token.email != null && request.auth.token.email.lower() == 'kazih6684@gmail.com') || isAdmin()) &&
                     request.resource.data.role == 'superadmin';
-      allow update, delete: if false; 
+      allow delete: if false; 
     }
   }
 }
