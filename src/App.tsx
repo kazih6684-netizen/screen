@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type FormEvent, type ChangeEvent } from 'react';
 import { 
   Home, 
   Trash2, 
@@ -174,7 +174,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Listen for Auth State
+  // Auth listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -185,6 +185,9 @@ export default function App() {
           const adminDoc = await getDoc(doc(db, path));
           if (adminDoc.exists()) {
             setIsAdmin(true);
+            // Automatically authorize admins to bypass PIN screen
+            setIsAuthorized(true);
+            sessionStorage.setItem('partner_access_granted', 'true');
           } else {
             // Check by email if needed (bootstrap)
             if (user.email === 'kazih6684@gmail.com') {
@@ -193,12 +196,16 @@ export default function App() {
                 role: 'superadmin'
               });
               setIsAdmin(true);
+              setIsAuthorized(true);
+              sessionStorage.setItem('partner_access_granted', 'true');
             } else {
               setIsAdmin(false);
             }
           }
         } catch (error) {
-          handleFirestoreError(error, OperationType.GET, path);
+          console.error("Admin check failed", error);
+          // If we can't check admin status, we don't grant it
+          setIsAdmin(false);
         }
       } else {
         setIsAdmin(false);
@@ -207,7 +214,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const handlePinSubmit = (e: React.FormEvent) => {
+  const handlePinSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (pinInput === correctPin) {
       setIsAuthorized(true);
@@ -236,18 +243,29 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOut(auth);
+    setIsAuthorized(false);
+    sessionStorage.removeItem('partner_access_granted');
   };
 
   const handleUpdatePin = async () => {
-    if (newPin.length < 4) return;
+    const pin = newPin.trim();
+    if (pin.length < 4) {
+      alert('PIN must be at least 4 digits');
+      return;
+    }
     const path = 'settings/global';
     try {
-      await setDoc(doc(db, path), { accessPin: newPin }, { merge: true });
+      await setDoc(doc(db, path), { accessPin: pin }, { merge: true });
       setIsChangingPin(false);
       setNewPin('');
       alert('PIN Updated Successfully!');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+    } catch (err: any) {
+      console.error('PIN Update failed:', err);
+      if (err.message?.includes('insufficient permissions')) {
+        alert('Permission Denied: Admin privileges required.');
+      } else {
+        alert('Failed to update PIN. Please try again.');
+      }
     }
   };
 
@@ -255,7 +273,7 @@ export default function App() {
     setData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -303,7 +321,7 @@ export default function App() {
           scale: 3,
           backgroundColor: '#0F172A',
           quality: 1,
-          features: { removeControlCharacters: true }
+          features: { removeControlCharacter: true }
         });
         const link = document.createElement('a');
         link.download = `unity-activation-${data.fullName.toLowerCase().replace(/\s+/g, '-') || 'card'}.png`;
