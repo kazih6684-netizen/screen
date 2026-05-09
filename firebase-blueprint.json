@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Settings": {
+      "title": "Global Settings",
+      "description": "Global configuration for the application",
+      "type": "object",
+      "properties": {
+        "accessPin": {
+          "type": "string",
+          "description": "The PIN required to access the application"
+        },
+        "logoUrl": {
+          "type": "string",
+          "description": "The persistent organization logo URL"
+        }
+      },
+      "required": ["accessPin"]
+    },
+    "Admin": {
+      "title": "Admin User",
+      "description": "Authorized admin account",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["superadmin"]
+        }
+      },
+      "required": ["email"]
+    }
+  },
+  "firestore": {
+    "settings/global": {
+      "schema": "Settings",
+      "description": "Global app settings"
+    },
+    "admins/{userId}": {
+      "schema": "Admin",
+      "description": "Admin users collection"
+    }
+  }
+}
