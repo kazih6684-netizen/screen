@@ -10,7 +10,6 @@ import {
   CheckCircle2, 
   ArrowLeft,
   Calendar,
-  ShieldCheck,
   Smartphone,
   Copy,
   Download,
@@ -25,10 +24,7 @@ import {
   Lock,
   CreditCard,
   ArrowRight,
-  LogOut,
-  ShieldAlert,
-  KeyRound,
-  LogIn
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -38,28 +34,15 @@ import { domToPng } from 'modern-screenshot';
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User as FirebaseUser
-} from 'firebase/auth';
-import { 
   getFirestore, 
   doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc,
   onSnapshot 
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-const googleProvider = new GoogleAuthProvider();
 
 /**
  * Utility for Tailwind class merging
@@ -96,182 +79,32 @@ const INITIAL_DATA: ProfileData = {
   logoUrl: undefined
 };
 
-// Firebase Operation Types
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
 export default function App() {
+  // States
   const [data, setData] = useState<ProfileData>(INITIAL_DATA);
   const [showPreview, setShowPreview] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   
-  // Auth & Access States
-  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
-    return sessionStorage.getItem('partner_access_granted') === 'true';
-  });
-  const [pinInput, setPinInput] = useState('');
-  const [correctPin, setCorrectPin] = useState<string | null>(null);
   const [globalLogoUrl, setGlobalLogoUrl] = useState<string | undefined>(undefined);
-  const [pinError, setPinError] = useState(false);
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isAdminLoading, setIsAdminLoading] = useState(false);
-  const [isChangingPin, setIsChangingPin] = useState(false);
-  const [newPin, setNewPin] = useState('');
 
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync Global Settings (PIN & Logo) from Firebase
+  // Sync Global Logo from Firebase
   useEffect(() => {
     const path = 'settings/global';
     const unsub = onSnapshot(doc(db, path), (docSnap) => {
       if (docSnap.exists()) {
         const settings = docSnap.data();
-        setCorrectPin(settings.accessPin);
         setGlobalLogoUrl(settings.logoUrl);
-      } else {
-        setCorrectPin('1122');
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      console.error('Settings fetch failed:', error);
     });
     return () => unsub();
   }, []);
 
-  // Auth listener
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        const path = `admins/${user.uid}`;
-        try {
-          // Check if user is in admins collection
-          const adminDoc = await getDoc(doc(db, path));
-          if (adminDoc.exists()) {
-            setIsAdmin(true);
-            // Automatically authorize admins to bypass PIN screen
-            setIsAuthorized(true);
-            sessionStorage.setItem('partner_access_granted', 'true');
-          } else {
-            // Check by email if needed (bootstrap)
-            if (user.email === 'kazih6684@gmail.com') {
-              try {
-                await setDoc(doc(db, path), {
-                  email: user.email,
-                  role: 'superadmin'
-                }, { merge: true });
-              } catch (e) {
-                console.warn("Bootstrap admin doc creation failed, but continuing as admin state is set locally", e);
-              }
-              setIsAdmin(true);
-              setIsAuthorized(true);
-              sessionStorage.setItem('partner_access_granted', 'true');
-            } else {
-              setIsAdmin(false);
-            }
-          }
-        } catch (error) {
-          console.error("Admin check failed", error);
-          // If we can't check admin status, we don't grant it
-          setIsAdmin(false);
-        }
-      } else {
-        setIsAdmin(false);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  const handlePinSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (pinInput === correctPin) {
-      setIsAuthorized(true);
-      sessionStorage.setItem('partner_access_granted', 'true');
-      setPinError(false);
-    } else {
-      setPinError(true);
-      setPinInput('');
-      setTimeout(() => setPinError(false), 2000);
-    }
-  };
-
-  const handleAdminLogin = async () => {
-    if (isAdminLoading) return;
-    setIsAdminLoading(true);
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      if ((err as any).code !== 'auth/cancelled-popup-request') {
-        console.error('Admin login failed:', err);
-      }
-    } finally {
-      setIsAdminLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-    setIsAuthorized(false);
-    sessionStorage.removeItem('partner_access_granted');
-  };
-
-  const handleUpdatePin = async () => {
-    const pin = newPin.trim();
-    if (pin.length < 4) {
-      alert('PIN must be at least 4 digits');
-      return;
-    }
-    const path = 'settings/global';
-    try {
-      await setDoc(doc(db, path), { accessPin: pin }, { merge: true });
-      setIsChangingPin(false);
-      setNewPin('');
-      alert('PIN Updated Successfully!');
-    } catch (err: any) {
-      console.error('PIN Update failed:', err);
-      if (err.message?.includes('insufficient permissions')) {
-        alert('Permission Denied: Admin privileges required.');
-      } else {
-        alert('Failed to update PIN. Please try again.');
-      }
-    }
-  };
 
   const handleInputChange = (field: keyof ProfileData, value: string) => {
     setData(prev => ({ ...prev, [field]: value }));
@@ -281,24 +114,9 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = async () => {
+      reader.onloadend = () => {
         const logoDataUrl = reader.result as string;
         setData(prev => ({ ...prev, logoUrl: logoDataUrl }));
-        
-        // If admin is logged in, also update the global logo
-        if (isAdmin) {
-          const path = 'settings/global';
-          try {
-            // Use setDoc with merge to handle cases where the document might not exist yet
-            await setDoc(doc(db, path), { 
-              logoUrl: logoDataUrl,
-              accessPin: correctPin || '1122' // Ensure accessPin is present to satisfy security rules if creating
-            }, { merge: true });
-          } catch (err) {
-            console.error('Failed to update global logo:', err);
-            handleFirestoreError(err, OperationType.WRITE, path);
-          }
-        }
       };
       reader.readAsDataURL(file);
     }
@@ -339,72 +157,6 @@ export default function App() {
     }
   };
 
-  // Render Gatekeeper if not authorized
-  if (!isAuthorized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0F172A] p-4 text-white">
-        <div className="w-full max-w-sm space-y-8 text-center">
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="flex flex-col items-center gap-4"
-          >
-            <div className="h-20 w-20 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-2xl shadow-indigo-500/20">
-               <ShieldCheck size={40} />
-            </div>
-            <div className="space-y-1">
-              <h1 className="text-2xl font-black tracking-tight uppercase">Access Locked</h1>
-              <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Enter Counsellor PIN to Continue</p>
-            </div>
-          </motion.div>
-
-          <form onSubmit={handlePinSubmit} className="space-y-4">
-            <div className="relative">
-              <input 
-                type="password"
-                maxLength={8}
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                placeholder="••••"
-                className={cn(
-                  "w-full rounded-2xl bg-white/5 border border-white/10 py-5 text-center text-3xl font-black tracking-[1em] text-white outline-none transition-all focus:bg-white/10 focus:border-indigo-500/50",
-                  pinError && "border-rose-500 animate-shake"
-                )}
-                autoFocus
-              />
-              {pinError && (
-                <div className="absolute inset-x-0 -bottom-6 text-[10px] font-bold text-rose-500 uppercase tracking-widest">
-                  Incorrect Security PIN
-                </div>
-              )}
-            </div>
-            <button 
-              type="submit"
-              className="w-full rounded-2xl bg-indigo-600 py-4 font-black tracking-[0.2em] text-white shadow-xl transition-all hover:bg-indigo-700 active:scale-95"
-            >
-              UNLOCK DASHBOARD
-            </button>
-          </form>
-
-          <footer className="pt-8 opacity-20 transition-opacity hover:opacity-100">
-             <button 
-              onClick={handleAdminLogin}
-              disabled={isAdminLoading}
-              className="flex items-center gap-2 mx-auto text-[10px] font-bold tracking-widest uppercase hover:text-indigo-400 disabled:opacity-50"
-             >
-               {isAdminLoading ? (
-                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
-               ) : (
-                 <LogIn size={14} />
-               )}
-               {isAdminLoading ? 'Authenticating...' : 'Admin Access'}
-             </button>
-          </footer>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       <AnimatePresence mode="wait">
@@ -425,39 +177,6 @@ export default function App() {
                 <h1 className="text-xl font-bold tracking-tight text-slate-800">Counsellor Dashboard</h1>
               </div>
               <div className="flex items-center gap-2">
-                {isAdmin ? (
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setIsChangingPin(!isChangingPin)}
-                      className={cn(
-                        "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
-                        isChangingPin ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
-                      )}
-                    >
-                      <KeyRound size={16} />
-                      {isChangingPin ? 'Cancel' : 'PIN'}
-                    </button>
-                    <button 
-                      onClick={handleLogout}
-                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"
-                    >
-                      <LogOut size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={handleAdminLogin}
-                    disabled={isAdminLoading}
-                    className="flex items-center gap-2 rounded-xl bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-100 disabled:opacity-50"
-                  >
-                    {isAdminLoading ? (
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
-                    ) : (
-                      <LogIn size={16} />
-                    )}
-                    {isAdminLoading ? 'Wait...' : 'Admin'}
-                  </button>
-                )}
                 <button 
                   onClick={() => setData(INITIAL_DATA)}
                   className="flex items-center gap-2 rounded-xl bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100"
@@ -467,41 +186,6 @@ export default function App() {
                 </button>
               </div>
             </header>
-
-            {/* Admin PIN Change UI */}
-            <AnimatePresence>
-              {isChangingPin && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="mb-8 overflow-hidden"
-                >
-                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-6 space-y-4">
-                    <div className="flex items-center gap-2 text-amber-800">
-                      <ShieldAlert size={20} />
-                      <h3 className="font-bold">Security Management</h3>
-                    </div>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text"
-                        value={newPin}
-                        onChange={(e) => setNewPin(e.target.value)}
-                        placeholder="New Access PIN"
-                        className="flex-1 rounded-xl border-amber-200 bg-white px-4 py-2 text-sm font-bold outline-none ring-amber-500/20 focus:ring-4"
-                      />
-                      <button 
-                        onClick={handleUpdatePin}
-                        className="rounded-xl bg-amber-600 px-6 py-2 text-sm font-bold text-white shadow-lg shadow-amber-200"
-                      >
-                        Update
-                      </button>
-                    </div>
-                    <p className="text-[10px] font-medium text-amber-700/60 uppercase tracking-widest">Changing this will instantly lock all sessions until the new PIN is entered.</p>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {/* Dashboard Form Container */}
             <main className="space-y-8 rounded-[2.5rem] bg-white p-6 sm:p-10 shadow-2xl shadow-slate-200/60 border border-slate-100 backdrop-blur-3xl">
